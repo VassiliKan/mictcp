@@ -1,6 +1,9 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
+mic_tcp_sock my_socket;
+mic_tcp_sock_addr sock_addr;
+int nombre_sockets=0; //pour generer un identifiant unique propre au socket
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
@@ -12,6 +15,15 @@ int mic_tcp_socket(start_mode sm)
    result = initialize_components(sm); /* Appel obligatoire */
    set_loss_rate(0);
 
+    if (result==-1){
+        printf("Erreur dans l'initialisation des components\n");
+    } else{
+    
+        my_socket.fd=nombre_sockets; //identifiant du socket, doit etre unique
+        nombre_sockets++;
+        my_socket.state = IDLE;
+        result = my_socket.fd;
+    }
    return result;
 }
 
@@ -22,7 +34,14 @@ int mic_tcp_socket(start_mode sm)
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 {
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   return -1;
+    if (my_socket.fd==socket){
+        my_socket.addr=addr;
+        my_socket.addr.ip_addr = malloc(addr.ip_addr_size*sizeof(char));
+        memcopy(my_socket.addr.ip_addr,addr.ip_addr, addr.ip_addr_size*sizeof(char));
+        return 0;
+    }else{
+        return -1;
+    }
 }
 
 /*
