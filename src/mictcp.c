@@ -18,7 +18,6 @@ int mic_tcp_socket(start_mode sm)
     if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
     } else{
-    
         my_socket.fd=nombre_sockets; //identifiant du socket, doit etre unique
         nombre_sockets++;
         my_socket.state = IDLE;
@@ -37,7 +36,7 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
     if (my_socket.fd==socket){
         my_socket.addr=addr;
         my_socket.addr.ip_addr = malloc(addr.ip_addr_size*sizeof(char));
-        memcopy(my_socket.addr.ip_addr,addr.ip_addr, addr.ip_addr_size*sizeof(char));
+        memcpy(my_socket.addr.ip_addr,addr.ip_addr, addr.ip_addr_size*sizeof(char));
         return 0;
     }else{
         return -1;
@@ -71,7 +70,26 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    if (my_socket.fd=mic_sock){
+        mic_tcp_pdu pdu;
+
+        pdu.header.source_port=my_socket.addr.port; /* numéro de port source */
+        pdu.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
+        pdu.header.seq_num=0; /* numéro de séquence */
+        pdu.header.ack_num=0; /* numéro d'acquittement */
+        pdu.header.syn=0; /* flag SYN (valeur 1 si activé et 0 si non) */
+        pdu.header.ack=0; /* flag ACK (valeur 1 si activé et 0 si non) */
+        pdu.header.fin=0;
+
+        pdu.payload.size = mesg_size;
+        pdu.payload.data = malloc (sizeof(char)*mesg_size);
+        memcpy(pdu.payload.data, mesg, mesg_size);
+
+        int result = IP_send(pdu, my_socket.addr_dist); 
+        return pdu.payload.mesg_size;
+    }else{
+        return -1;
+    }
 }
 
 /*
