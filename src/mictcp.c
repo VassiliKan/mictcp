@@ -71,11 +71,24 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         pdu.header.source_port=my_socket.addr.port; /* numéro de port source */
         pdu.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
        
+        
+        pdu.header.seq_num = num_seq; /* numéro de séquence */
+        //pdu.header.ack_num; /* numéro d'acquittement */
+        //pdu.header.syn; /* flag SYN (valeur 1 si activé et 0 si non) */
+        //pdu.header.ack; /* flag ACK (valeur 1 si activé et 0 si non) */
+        //pdu.header.fin; /* flag FIN (valeur 1 si activé et 0 si non) */
+
         pdu.payload.size = mesg_size;
         pdu.payload.data = malloc (sizeof(char)*mesg_size);
         memcpy(pdu.payload.data, mesg, mesg_size);
-
+        
+        mic_tcp_pdu pdu_ack;
         IP_send(pdu, my_socket.addr_dist); 
+        int result = IP_recv(&pdu_ack, NULL, 1000);
+        while (result == -1 || (pdu_ack.header.ack=1 && pdu_ack.header.ack_num!=pdu.header.seq_num)); //expiration timer
+        IP_send(pdu, my_socket.addr_dist); 
+        result = IP_recv(&pdu_ack, NULL, 1000);
+        
         return pdu.payload.size;
     }else{
         return -1;
@@ -90,18 +103,13 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
  */
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {   
-    int retour = -1;
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     mic_tcp_pdu pdu;
     pdu.payload.data = mesg;
     pdu.payload.size = max_mesg_size;
     int mesg_size = app_buffer_get(pdu.payload);
-    if (mesg_size > max_mesg_size){
-        return -1;
-    }
-    
+    process_received_PDU(pdu,socket);
     return mesg_size;
-    
 }
 
 /*
@@ -124,5 +132,24 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    app_buffer_put(pdu.payload);
+    if (pdu.header.seq_num == num_seq){ //bien recu
+        app_buffer_put(pdu.payload);
+
+        mic_tcp_pdu pdu_ack;
+        pdu_ack.header.source_port=my_socket.addr.port; /* numéro de port source */
+        pdu_ack.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
+        pdu_ack.header.ack_num = pdu.header.seq_num; /* numéro d'acquittement */
+        pdu.header.ack=1; /* flag ACK (valeur 1 si activé et 0 si non) */
+        IP_send(pdu_ack, my_socket.addr_dist); 
+        printf("bien recu paquet %d\n", pdu_ack.header.ack_num);
+    } else{ //numero d'acquittement mauvais
+        mic_tcp_pdu pdu_ack;
+        pdu_ack.header.source_port=my_socket.addr.port; /* numéro de port source */
+        pdu_ack.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
+        pdu_ack.header.ack_num = pdu.header.seq_num-1; /* numéro d'acquittement */
+        pdu.header.ack=1; /* flag ACK (valeur 1 si activé et 0 si non) */
+        IP_send(pdu_ack, my_socket.addr_dist); 
+        printf("pas recu le bon paquet, on redemande paquet %d\n", pdu.header.seq_num);
+    }
+    
 }
