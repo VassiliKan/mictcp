@@ -4,6 +4,8 @@
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
 int nombre_sockets=0; //pour generer un identifiant unique propre au socket
+int num_seq = 0;
+
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
@@ -79,7 +81,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
         pdu.header.source_port=my_socket.addr.port; /* numéro de port source */
         pdu.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
-        pdu.header.seq_num=0; /* numéro de séquence */
+        pdu.header.seq_num=num_seq; /* numéro de séquence */
         pdu.header.ack_num=0; /* numéro d'acquittement */
         pdu.header.syn=0; /* flag SYN (valeur 1 si activé et 0 si non) */
         pdu.header.ack=0; /* flag ACK (valeur 1 si activé et 0 si non) */
@@ -107,15 +109,14 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
     int retour = -1;
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     mic_tcp_pdu pdu;
-    pdu.payload.data = malloc (sizeof(char)*max_mesg_size);
+    pdu.payload.data = mesg;
+    pdu.payload.size = max_mesg_size;
     int mesg_size = app_buffer_get(pdu.payload);
-    pdu.payload.size = mesg_size;
     if (mesg_size > max_mesg_size){
         return -1;
     }
-    mesg = pdu.payload.data;
-    retour = pdu.payload.size;
-    return retour;
+    
+    return mesg_size;
     
 }
 
@@ -127,7 +128,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    return 0;
 }
 
 /*
