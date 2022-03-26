@@ -1,29 +1,35 @@
 #include <mictcp.h>
+#include <string.h>
 #include <api/mictcp_core.h>
 
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
-int nombre_sockets=0; //pour generer un identifiant unique propre au socket
-int num_seq = 0;
+int num_socket = 10; //pour generer un identifiant unique propre au socket
+
+int seq_num = 0;
+int ack_num = 0;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
  */
-int mic_tcp_socket(start_mode sm)
-{
-   int result = -1;
+int mic_tcp_socket(start_mode sm) {
+    
+   int result;
+
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+   
    result = initialize_components(sm); /* Appel obligatoire */
    set_loss_rate(0);
 
     if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
+        exit(1);
     } else{
-        my_socket.fd=nombre_sockets; //identifiant du socket, doit etre unique
-        nombre_sockets++;
+        my_socket.fd = num_socket; //identifiant du socket, doit etre unique
         my_socket.state = IDLE;
         result = my_socket.fd;
+        num_socket++;
     }
    return result;
 }
@@ -32,8 +38,8 @@ int mic_tcp_socket(start_mode sm)
  * Permet d’attribuer une adresse à un socket.
  * Retourne 0 si succès, et -1 en cas d’échec
  */
-int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
-{
+int mic_tcp_bind(int socket, mic_tcp_sock_addr addr) {
+ 
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     return 0;
 }
@@ -42,8 +48,8 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
  * Met le socket en état d'acceptation de connexions
  * Retourne 0 si succès, -1 si erreur
  */
-int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
-{
+int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
+  
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     return 0;
 }
@@ -52,8 +58,8 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
  * Permet de réclamer l’établissement d’une connexion
  * Retourne 0 si la connexion est établie, et -1 en cas d’échec
  */
-int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
-{
+int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
+    
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     return 0;
 }
@@ -62,37 +68,43 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
-int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
-{
+int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
+    
+    mic_tcp_pdu pdu_send;
+    mic_tcp_pdu pdu_recv;
+    int result;
+    int retry = 0;
+
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    if (my_socket.fd==mic_sock){
-        mic_tcp_pdu pdu;
-
-        pdu.header.source_port=my_socket.addr.port; /* numéro de port source */
-        pdu.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
-       
-        
-        pdu.header.seq_num = num_seq; /* numéro de séquence */
-        //pdu.header.ack_num; /* numéro d'acquittement */
-        //pdu.header.syn; /* flag SYN (valeur 1 si activé et 0 si non) */
-        //pdu.header.ack; /* flag ACK (valeur 1 si activé et 0 si non) */
-        //pdu.header.fin; /* flag FIN (valeur 1 si activé et 0 si non) */
-
-        pdu.payload.size = mesg_size;
-        pdu.payload.data = malloc (sizeof(char)*mesg_size);
-        memcpy(pdu.payload.data, mesg, mesg_size);
-        
-        mic_tcp_pdu pdu_ack;
-        IP_send(pdu, my_socket.addr_dist); 
-        int result = IP_recv(&pdu_ack, NULL, 1000);
-        while (result == -1 || (pdu_ack.header.ack=1 && pdu_ack.header.ack_num!=pdu.header.seq_num)); //expiration timer
-        IP_send(pdu, my_socket.addr_dist); 
-        result = IP_recv(&pdu_ack, NULL, 1000);
-        
-        return pdu.payload.size;
-    }else{
+    
+    if (my_socket.fd != mic_sock){
         return -1;
     }
+
+    pdu_send.header.source_port = my_socket.addr.port; 
+    pdu_send.header.dest_port = my_socket.addr_dist.port; 
+    pdu_send.header.seq_num = seq_num; 
+
+    pdu_send.payload.size = mesg_size;
+    pdu_send.payload.data = malloc (sizeof(char)*mesg_size);
+    memcpy(pdu_send.payload.data, mesg, mesg_size);
+
+    do {
+        result = IP_send(pdu_send, my_socket.addr_dist); 
+        //printf("ENVOIE SEQ NUMERO %d\n", seq_num);
+        if(IP_recv(&pdu_recv, NULL, 100) == -1) {
+            retry = 1;
+        } else if (pdu_recv.header.ack_num != seq_num) {
+            retry = 1;
+        } else {
+            retry = 0;
+            seq_num = (seq_num + 1) % 2;
+        }
+    } while (retry);
+    
+    //seq_num = (seq_num + 1) % 2;
+    
+    return result;
 }
 
 /*
@@ -101,26 +113,16 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
  * Retourne le nombre d’octets lu ou bien -1 en cas d’erreur
  * NB : cette fonction fait appel à la fonction app_buffer_get()
  */
-int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
-{   
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+int mic_tcp_recv (int socket, char* mesg, int max_mesg_size) {   
+     
     mic_tcp_pdu pdu;
+
+    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
     pdu.payload.data = mesg;
     pdu.payload.size = max_mesg_size;
-    int mesg_size = app_buffer_get(pdu.payload);
-    process_received_PDU(pdu,socket);
-    return mesg_size;
-}
 
-/*
- * Permet de réclamer la destruction d’un socket.
- * Engendre la fermeture de la connexion suivant le modèle de TCP.
- * Retourne 0 si tout se passe bien et -1 en cas d'erreur
- */
-int mic_tcp_close (int socket)
-{
-    printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    return 0;
+    return app_buffer_get(pdu.payload);
 }
 
 /*
@@ -129,27 +131,32 @@ int mic_tcp_close (int socket)
  * le buffer de réception du socket. Cette fonction utilise la fonction
  * app_buffer_put().
  */
-void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
-{
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    if (pdu.header.seq_num == num_seq){ //bien recu
-        app_buffer_put(pdu.payload);
-
-        mic_tcp_pdu pdu_ack;
-        pdu_ack.header.source_port=my_socket.addr.port; /* numéro de port source */
-        pdu_ack.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
-        pdu_ack.header.ack_num = pdu.header.seq_num; /* numéro d'acquittement */
-        pdu.header.ack=1; /* flag ACK (valeur 1 si activé et 0 si non) */
-        IP_send(pdu_ack, my_socket.addr_dist); 
-        printf("bien recu paquet %d\n", pdu_ack.header.ack_num);
-    } else{ //numero d'acquittement mauvais
-        mic_tcp_pdu pdu_ack;
-        pdu_ack.header.source_port=my_socket.addr.port; /* numéro de port source */
-        pdu_ack.header.dest_port=my_socket.addr_dist.port; /* numéro de port de destination */
-        pdu_ack.header.ack_num = pdu.header.seq_num-1; /* numéro d'acquittement */
-        pdu.header.ack=1; /* flag ACK (valeur 1 si activé et 0 si non) */
-        IP_send(pdu_ack, my_socket.addr_dist); 
-        printf("pas recu le bon paquet, on redemande paquet %d\n", pdu.header.seq_num);
-    }
+void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
     
+    mic_tcp_pdu pdu_ack;
+
+    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
+    if(pdu.header.seq_num == ack_num) {
+        app_buffer_put(pdu.payload);
+    } 
+
+    pdu_ack.header.source_port = my_socket.addr.port;
+    pdu_ack.header.dest_port = my_socket.addr_dist.port;
+    pdu_ack.header.ack_num = ack_num;
+
+    IP_send(pdu_ack, my_socket.addr_dist);
+    ack_num = (ack_num + 1 ) % 2;
+
+}
+
+/*
+ * Permet de réclamer la destruction d’un socket.
+ * Engendre la fermeture de la connexion suivant le modèle de TCP.
+ * Retourne 0 si tout se passe bien et -1 en cas d'erreur
+ */
+int mic_tcp_close (int socket) {
+
+    printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
+    return 0;
 }
