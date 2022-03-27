@@ -1,5 +1,4 @@
 #include <mictcp.h>
-#include <string.h>
 #include <api/mictcp_core.h>
 
 mic_tcp_sock my_socket;
@@ -8,6 +7,8 @@ int num_socket = 10; //pour generer un identifiant unique propre au socket
 
 int seq_num = 0;
 int ack_num = 0;
+
+// add comment
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -25,7 +26,7 @@ int mic_tcp_socket(start_mode sm) {
     if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
         exit(1);
-    } else{
+    } else {
         my_socket.fd = num_socket; //identifiant du socket, doit etre unique
         my_socket.state = IDLE;
         result = my_socket.fd;
