@@ -1,6 +1,8 @@
 #include <mictcp.h>
-#include <string.h>
 #include <api/mictcp_core.h>
+
+#define LOSS_RATE 1
+#define LOSS_ACCEPTANCE 150
 
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
@@ -8,6 +10,10 @@ int num_socket = 10; //pour generer un identifiant unique propre au socket
 
 int seq_num = 0;
 int ack_num = 0;
+
+int nb_loss = 0;
+int nb_send = 0;
+int effective_loss_rate = 0;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -20,12 +26,12 @@ int mic_tcp_socket(start_mode sm) {
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
    
    result = initialize_components(sm); /* Appel obligatoire */
-   set_loss_rate(0);
+   set_loss_rate(LOSS_RATE);
 
     if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
         exit(1);
-    } else{
+    } else {
         my_socket.fd = num_socket; //identifiant du socket, doit etre unique
         my_socket.state = IDLE;
         result = my_socket.fd;
@@ -72,13 +78,13 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv;
-    int result;
+    int res_send;
+    int res_recv;
     int retry = 0;
 
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
     if (my_socket.fd != mic_sock){
-        printf("ERR SOCKET");
         return -1;
     }
 
@@ -91,19 +97,27 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     memcpy(pdu_send.payload.data, mesg, mesg_size);
 
     do {
-        result = IP_send(pdu_send, my_socket.addr_dist); 
-        if(IP_recv(&pdu_recv, NULL, 100) == -1) {
-            retry = 1;
-        } else if (pdu_recv.header.ack_num != seq_num) {
-            retry = 1;
-        } else {
+        res_send = IP_send(pdu_send, my_socket.addr_dist); 
+        res_recv = IP_recv(&pdu_recv, NULL, 100);
+        nb_send++;
+
+        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) {
+            nb_loss++;
+            effective_loss_rate = nb_loss * 100 / nb_send;
+            if(effective_loss_rate > LOSS_ACCEPTANCE){
+                retry = 1;
+            } else {
+                retry = 0;
+            }    
+           // printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
+        } else { // cas ok
             retry = 0;
         }
     } while (retry);
     
     seq_num = (seq_num + 1) % 2;
-    
-    return result;
+
+    return res_send;
 }
 
 /*
