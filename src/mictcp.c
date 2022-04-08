@@ -1,10 +1,11 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define LOSS_RATE 1
+#define LOSS_RATE 5
 #define LOSS_WINDOW_SIZE 100
 #define LOSS_ACCEPTANCE 2
 #define MAX_TRY_CONNECT 15
+#define TIMER 5
 
 protocol_state client_state;
 protocol_state serveur_state;
@@ -101,10 +102,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 
     pdu_send.header.source_port = my_socket.addr.port; 
     pdu_send.header.dest_port = my_socket.addr_dist.port; 
-    pdu_send.header.syn = 1;
-
-    nb_try++;
-
+    pdu_send.header.syn = 1;n abandonne
     do {
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, 100);
@@ -134,12 +132,12 @@ int calcul_loss_rate(){
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     
     mic_tcp_pdu pdu_send;
-    mic_tcp_pdu pdu_recv;
+    mic_tcp_pdu pdu_recv = {0};
     int res_send;
     int res_recv;
     int retry = 0;
 
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+    //printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
     if (my_socket.fd != mic_sock){
         return -1;
@@ -162,31 +160,30 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         }
 
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
-        res_recv = IP_recv(&pdu_recv, NULL, 100);
+        res_recv = IP_recv(&pdu_recv, NULL, TIMER);
 
         
         if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
             lossWindow[lossWindowIndex] = 1;
-            printf("echec envoi\n");
 
             effective_loss_rate = calcul_loss_rate();
-            printf("taux de pertes : %d\n", effective_loss_rate);
             if(effective_loss_rate > LOSS_ACCEPTANCE){ //abandon de l'envoi apres trop d'echec
-                retry = 0;
-                printf("on abandonne\n");
-            } else {
                 retry = 1;
-                printf("on reessaie\n");
+                printf("abandon   ");
+            } else {
+                retry = 0;
+                printf("reessai   ");
             }    
            // printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
         } else {  //reussite de l'envoi
             lossWindow[lossWindowIndex]=0;
             retry = 0;
-            printf("reussite envoi\n");
+            printf("succes   ");
         }
 
         lossWindowIndex++;
 
+        printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
     
     seq_num = (seq_num + 1) % 2;
