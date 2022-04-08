@@ -102,5 +102,6 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size);
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size);
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr);
 int mic_tcp_close(int socket);
+int calcul_loss_rate();
 
 #endif
