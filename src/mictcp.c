@@ -1,8 +1,8 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define LOSS_RATE 1
-#define LOSS_ACCEPTANCE 150
+#define LOSS_RATE 3
+#define LOSS_ACCEPTANCE 2
 
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
@@ -95,11 +95,12 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     pdu_send.payload.size = mesg_size;
     pdu_send.payload.data = malloc (sizeof(char)*mesg_size);
     memcpy(pdu_send.payload.data, mesg, mesg_size);
+   
+    nb_send++;
 
     do {
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, 100);
-        nb_send++;
 
         if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) {
             nb_loss++;
@@ -109,7 +110,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
             } else {
                 retry = 0;
             }    
-           // printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
+            printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
         } else { // cas ok
             retry = 0;
         }
