@@ -1,7 +1,8 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define LOSS_RATE 3
+#define LOSS_RATE 1
+#define LOSS_WINDOW_SIZE 100
 #define LOSS_ACCEPTANCE 2
 #define MAX_TRY_CONNECT 15
 
@@ -10,16 +11,22 @@ enum state {IDLE, WAIT_FOR_CONNECTION, ACCEPT, CONNECTED};
 state client_state;
 state serveur_state;
 
+//sockets
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
 int num_socket = 10; //pour generer un identifiant unique propre au socket
 
+//numéros de séquence
 int seq_num = 0;
 int ack_num = 0;
 
+//reprise des pertes
 int nb_loss = 0;
 int nb_send = 0;
 int effective_loss_rate = 0;
+int lossWindow[LOSS_WINDOW_SIZE];
+int lossWindowIndex = 0;
+
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -42,6 +49,11 @@ int mic_tcp_socket(start_mode sm) {
         my_socket.state = IDLE;
         result = my_socket.fd;
         num_socket++;
+    }
+
+    //initialisation du tableau de pertes
+    for (int i =0; i<LOSS_WINDOW_SIZE; i++){
+        lossWindow[i]=0;
     }
    return result;
 }
@@ -133,22 +145,44 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
    
     nb_send++;
 
+   
+
     do {
+
+        if (lossWindowIndex == LOSS_WINDOW_SIZE) { //cyclage du tableau de pertes
+        lossWindowIndex = 0;
+        }
+
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, 100);
+        
+        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
+            lossWindow[lossWindowIndex]=1;
+            nb_loss=0;
+            printf("echec envoi\n");
 
-        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) {
-            nb_loss++;
-            effective_loss_rate = nb_loss * 100 / nb_send;
-            if(effective_loss_rate > LOSS_ACCEPTANCE){
-                retry = 1;
-            } else {
+            for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+                if (lossWindow[i]) { //si la case est un echec d'envoi
+                    nb_loss++;
+                }
+            }
+            effective_loss_rate = nb_loss * 100 / LOSS_WINDOW_SIZE;
+
+
+            if(effective_loss_rate > LOSS_ACCEPTANCE){ //abandon de l'envoi apres trop d'echec
                 retry = 0;
+                printf("on abandonne\n");
+            } else {
+                retry = 1;
+                printf("on reessaie\n");
             }    
-            printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
-        } else { // cas ok
+           // printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
+        } else {  //reussite de l'envoi
+            lossWindow[lossWindowIndex]=0;
             retry = 0;
+            printf("reussite envoi\n");
         }
+        lossWindowIndex++;
     } while (retry);
     
     seq_num = (seq_num + 1) % 2;
