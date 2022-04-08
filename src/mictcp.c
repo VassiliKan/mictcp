@@ -2,8 +2,8 @@
 #include <api/mictcp_core.h>
 
 #define LOSS_RATE 1
-#define LOSS_ACCEPTANCE 150
 #define LOSS_WINDOW_SIZE 100
+#define LOSS_ACCEPTANCE 2
 
 //sockets
 mic_tcp_sock my_socket;
@@ -107,6 +107,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     pdu_send.payload.size = mesg_size;
     pdu_send.payload.data = malloc (sizeof(char)*mesg_size);
     memcpy(pdu_send.payload.data, mesg, mesg_size);
+   
+    nb_send++;
 
    
 
