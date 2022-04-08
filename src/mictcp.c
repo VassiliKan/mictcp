@@ -117,6 +117,16 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     return 0;
 }
 
+
+
+int calcul_loss_rate(){
+    int loss=0;
+    for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+        loss += lossWindow[i];
+    }
+    return loss * 100 / LOSS_WINDOW_SIZE;
+}
+
 /*
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
@@ -153,13 +163,14 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, 100);
+
         
         if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
             lossWindow[lossWindowIndex] = 1;
             printf("echec envoi\n");
 
             effective_loss_rate = calcul_loss_rate();
-            
+            printf("taux de pertes : %d\n", effective_loss_rate);
             if(effective_loss_rate > LOSS_ACCEPTANCE){ //abandon de l'envoi apres trop d'echec
                 retry = 0;
                 printf("on abandonne\n");
@@ -185,13 +196,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
 
 
-int calcul_loss_rate(){
-    int loss;
-    for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
-        loss += lossWindow[i];
-    }
-    return loss * 100 / LOSS_WINDOW_SIZE;
-}
 
 /*
  * Permet à l’application réceptrice de réclamer la récupération d’une donnée
