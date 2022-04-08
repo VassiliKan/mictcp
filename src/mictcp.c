@@ -3,6 +3,12 @@
 
 #define LOSS_RATE 3
 #define LOSS_ACCEPTANCE 2
+#define MAX_TRY_CONNECT 15
+
+enum state {IDLE, WAIT_FOR_CONNECTION, ACCEPT, CONNECTED};
+
+state client_state;
+state serveur_state;
 
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
@@ -55,8 +61,11 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr) {
  * Retourne 0 si succès, -1 si erreur
  */
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
-  
+    
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+
+    serveur_state = ACCEPT;
+
     return 0;
 }
 
@@ -67,6 +76,32 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    
+    mic_tcp_pdu pdu_send;
+    mic_tcp_pdu pdu_recv;
+    int res_send;
+    int res_recv;
+    int nb_try = 0;
+
+    if (my_socket.fd != mic_sock){
+        return -1;
+    }
+
+    pdu_send.header.source_port = my_socket.addr.port; 
+    pdu_send.header.dest_port = my_socket.addr_dist.port; 
+    pdu_send.header.syn = 1;
+
+    nb_try++;
+
+    do {
+        res_send = IP_send(pdu_send, my_socket.addr_dist); 
+        res_recv = IP_recv(&pdu_recv, NULL, 100);
+
+    } while (res_recv == -1 && nb_try < MAX_TRY_CONNECT);
+      
+
+    // envoie ACK
+
     return 0;
 }
 
