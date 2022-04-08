@@ -6,10 +6,8 @@
 #define LOSS_ACCEPTANCE 2
 #define MAX_TRY_CONNECT 15
 
-enum state {IDLE, WAIT_FOR_CONNECTION, ACCEPT, CONNECTED};
-
-state client_state;
-state serveur_state;
+protocol_state client_state;
+protocol_state serveur_state;
 
 //sockets
 mic_tcp_sock my_socket;
@@ -77,7 +75,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
 
-    serveur_state = ACCEPT;
+    //serveur_state = ACCEPT;
 
     return 0;
 }
@@ -90,6 +88,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     
+    /*
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv;
     int res_send;
@@ -114,7 +113,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
       
 
     // envoie ACK
-
+*/
     return 0;
 }
 
