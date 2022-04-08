@@ -13,6 +13,7 @@ Dans le cas d'une perte
 #define LOSS_WINDOW_SIZE 10
 #define LOSS_ACCEPTANCE 30
 #define MAX_TRY_CONNECT 15
+#define TIMER 5
 
 protocol_state client_state;
 protocol_state serveur_state;
@@ -104,10 +105,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 
     pdu_send.header.source_port = my_socket.addr.port; 
     pdu_send.header.dest_port = my_socket.addr_dist.port; 
-    pdu_send.header.syn = 1;
-
-    nb_try++;
-
+    pdu_send.header.syn = 1;n abandonne
     do {
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, 100);
@@ -121,6 +119,16 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     return 0;
 }
 
+
+
+int calcul_loss_rate(){
+    int loss=0;
+    for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+        loss += lossWindow[i];
+    }
+    return loss * 100 / LOSS_WINDOW_SIZE;
+}
+
 /*
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
@@ -128,12 +136,12 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     
     mic_tcp_pdu pdu_send;
-    mic_tcp_pdu pdu_recv;
+    mic_tcp_pdu pdu_recv = {0};
     int res_send;
     int res_recv;
     int retry = 0;
 
- //   printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+    //printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
     if (my_socket.fd != mic_sock){
         return -1;
@@ -156,7 +164,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         }
 
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
-        res_recv = IP_recv(&pdu_recv, NULL, 100);
+        res_recv = IP_recv(&pdu_recv, NULL, TIMER);
+
         
         printf("ENVOI %d ", nb_send);
         if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
@@ -180,6 +189,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
         loss_window_index++;
 
+        printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
     
     seq_num = (seq_num + 1) % 2;
