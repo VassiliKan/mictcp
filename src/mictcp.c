@@ -1,19 +1,40 @@
+/*
+
+
+Pb ack / seq num : séquence Abandon abandon abandon retry (n fois éventuellement)
+Dans le cas d'une perte
+
+*/
+
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define LOSS_RATE 25
-#define LOSS_ACCEPTANCE 100
+#define LOSS_RATE 1
+#define LOSS_WINDOW_SIZE 10
+#define LOSS_ACCEPTANCE 30
+#define MAX_TRY_CONNECT 15
+#define TIMER 5
 
+protocol_state client_state;
+protocol_state serveur_state;
+
+//sockets
 mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
 int num_socket = 10; //pour generer un identifiant unique propre au socket
 
+//numéros de séquence
 int seq_num = 0;
 int ack_num = 0;
 
-int nb_loss = 0;
+//reprise des pertes
 int nb_send = 0;
 int effective_loss_rate = 0;
+
+/////////////////////
+int loss_window[LOSS_WINDOW_SIZE]= {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int loss_window_index = 0;
+
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -37,7 +58,8 @@ int mic_tcp_socket(start_mode sm) {
         result = my_socket.fd;
         num_socket++;
     }
-   return result;
+
+    return result;
 }
 
 /*
@@ -55,8 +77,11 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr) {
  * Retourne 0 si succès, -1 si erreur
  */
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
-  
+    
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+
+    //serveur_state = ACCEPT;
+
     return 0;
 }
 
@@ -67,7 +92,41 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+   /* 
+    mic_tcp_pdu pdu_send;
+    mic_tcp_pdu pdu_recv;
+    int res_send;
+    int res_recv;
+    int nb_try = 0;
+
+    if (my_socket.fd != mic_sock){
+        return -1;
+    }
+
+    pdu_send.header.source_port = my_socket.addr.port; 
+    pdu_send.header.dest_port = my_socket.addr_dist.port; 
+    pdu_send.header.syn = 1;n abandonne
+    do {
+        res_send = IP_send(pdu_send, my_socket.addr_dist); 
+        res_recv = IP_recv(&pdu_recv, NULL, 100);
+
+    } while (res_recv == -1 && nb_try < MAX_TRY_CONNECT);
+      
+    client_state = SYN_SENT;
+
+    // envoie ACK dans process pdu ?
+*/
     return 0;
+}
+
+
+
+int calcul_loss_rate(){
+    int loss=0;
+    for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+        loss += lossWindow[i];
+    }
+    return loss * 100 / LOSS_WINDOW_SIZE;
 }
 
 /*
@@ -77,12 +136,12 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     
     mic_tcp_pdu pdu_send;
-    mic_tcp_pdu pdu_recv;
+    mic_tcp_pdu pdu_recv = {0};
     int res_send;
     int res_recv;
     int retry = 0;
 
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+    //printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
     if (my_socket.fd != mic_sock){
         return -1;
@@ -95,28 +154,60 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     pdu_send.payload.size = mesg_size;
     pdu_send.payload.data = malloc (sizeof(char)*mesg_size);
     memcpy(pdu_send.payload.data, mesg, mesg_size);
-
+   
+    nb_send++;
+    
     do {
-        res_send = IP_send(pdu_send, my_socket.addr_dist); 
-        res_recv = IP_recv(&pdu_recv, NULL, 100);
-        nb_send++;
 
-        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) {
-            nb_loss++;
-            effective_loss_rate = nb_loss * 100 / nb_send;
-            if(effective_loss_rate > LOSS_ACCEPTANCE){
+        if (loss_window_index == LOSS_WINDOW_SIZE) { //cyclage du tableau de pertes
+            loss_window_index = 0;
+        }
+
+        res_send = IP_send(pdu_send, my_socket.addr_dist); 
+        res_recv = IP_recv(&pdu_recv, NULL, TIMER);
+
+        
+        printf("ENVOI %d ", nb_send);
+        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
+            printf("ECHEC : ");
+            loss_window[loss_window_index] = 1;
+            effective_loss_rate = calcul_loss_rate();
+            
+            // Cas trop de pertes, on renvoie
+            if(effective_loss_rate > LOSS_ACCEPTANCE){ 
+                printf("RETRY\n");                
                 retry = 1;
             } else {
+                printf("ABANDON\n");
                 retry = 0;
             }    
-        } else { // cas ok
+        } else {  // succès envoie
+            printf("SUCCES\n");
+            loss_window[loss_window_index] = 0;
             retry = 0;
         }
+
+        loss_window_index++;
+
+        printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
     printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
     seq_num = (seq_num + 1) % 2;
 
     return res_send;
+}
+
+
+/*
+ * Calcule le taux de pertes sur la fenêtre glissante 
+ *  Renvoie un entier correspondant à ce taux (en %)
+ */
+int calcul_loss_rate(){
+    int loss = 0;
+    for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+        loss += loss_window[i];
+    }
+    return loss * 100 / LOSS_WINDOW_SIZE;
 }
 
 /*
