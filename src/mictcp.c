@@ -9,11 +9,11 @@ Dans le cas d'une perte
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define LOSS_RATE 1
-#define LOSS_WINDOW_SIZE 30
+#define LOSS_RATE 50
+#define LOSS_WINDOW_SIZE 10
 #define LOSS_ACCEPTANCE 10
 #define MAX_TRY_CONNECT 15
-#define TIMER 5
+#define TIMER 2000
 
 protocol_state client_state;
 protocol_state serveur_state;
@@ -29,6 +29,7 @@ int ack_num = 0;
 
 //reprise des pertes
 int nb_send = 0;
+int num_trame = 0;
 int effective_loss_rate = 0;
 
 /////////////////////
@@ -92,7 +93,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   /* 
+   
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv;
     int res_send;
@@ -115,7 +116,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
     client_state = SYN_SENT;
 
     // envoie ACK dans process pdu ?
-*/
+
     return 0;
 }
 
@@ -128,8 +129,27 @@ int calcul_loss_rate(){
     int loss = 0;
     for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
         loss += loss_window[i];
+        printf("%d", loss_window[i]);
     }
     return loss * 100 / LOSS_WINDOW_SIZE;
+}
+
+
+int decideRetry(){
+    int retry;
+
+    loss_window[loss_window_index] = 1;
+    effective_loss_rate = calcul_loss_rate();
+            
+    // Cas trop de pertes, on renvoie
+    if(effective_loss_rate > LOSS_ACCEPTANCE){ 
+        printf("RETRY\n");                
+        retry = 1;
+    } else {
+        printf("ABANDON\n");
+        retry = 0;
+    }    
+    return retry;
 }
 
 
@@ -144,6 +164,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     int res_send;
     int res_recv;
     int retry = 0;
+    
 
     //printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
@@ -169,25 +190,23 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, TIMER);
-
         
-        printf("ENVOI %d ", nb_send);
-        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
-            printf("ECHEC : ");
-            loss_window[loss_window_index] = 1;
-            effective_loss_rate = calcul_loss_rate();
-            
-            // Cas trop de pertes, on renvoie
-            if(effective_loss_rate > LOSS_ACCEPTANCE){ 
-                printf("RETRY\n");                
-                retry = 1;
-            } else {
-                printf("ABANDON\n");
-                retry = 0;
-            }    
-        } else {  // succès envoie
+        //effective_loss_rate = calcul_loss_rate();
+        
+        //printf("ENVOI %d ", nb_send);
+        if(res_recv == -1) { // expiration timer
+            printf("ECHEC TIMER: ");
+            retry = decideRetry();
+        } else if (pdu_recv.header.ack_num != seq_num){ // reception du mauvais numero d'acquittement 
+                printf("ECHEC ACK != SEQ : ");
+            retry = decideRetry();
+            if (!retry) {
+                seq_num = (seq_num + 1) % 2;
+            }
+        } else {  // succès envoi
             //printf("SUCCES\n");
             loss_window[loss_window_index] = 0;
+            seq_num = (seq_num + 1) % 2;
             retry = 0;
         }
 
@@ -196,8 +215,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         //printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
     printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
-    seq_num = (seq_num + 1) % 2;
-
+    num_trame++;
     return res_send;
 }
 
@@ -241,6 +259,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
     pdu_ack.header.ack_num = ack_num;
 
     IP_send(pdu_ack, my_socket.addr_dist);
+
     ack_num = (ack_num + 1 ) % 2;
 
 }
