@@ -23,13 +23,14 @@ int num_socket = 10; //pour generer un identifiant unique propre au socket
 //numéros de séquence
 int seq_num = 0;
 int ack_num = 0;
+//PENSER A RESET A LA CONNEXION
 
 //reprise des pertes
 int nb_send = 0;
 int effective_loss_rate = 0;
 
 /////////////////////
-int loss_window[LOSS_WINDOW_SIZE]= {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int loss_window[LOSS_WINDOW_SIZE]= {0};
 int loss_window_index = 0;
 
 
@@ -165,7 +166,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
         
         printf("ENVOI %d ", nb_send);
-        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num+1%2) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
+        if(res_recv == -1 || pdu_recv.header.ack_num != (seq_num+1)%2) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
             printf("ECHEC : ");
             loss_window[loss_window_index] = 1;
             effective_loss_rate = calcul_loss_rate();
@@ -205,8 +206,8 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size) {
      
     mic_tcp_pdu pdu;
 
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-
+/*     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+ */
     pdu.payload.data = mesg;
     pdu.payload.size = max_mesg_size;
 
@@ -223,11 +224,13 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
     
     mic_tcp_pdu pdu_ack;
 
-    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-
+/*     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+ */
     if(pdu.header.seq_num == ack_num) {
         app_buffer_put(pdu.payload);
     } 
+
+    printf("%d\n",pdu.header.seq_num);
 
     pdu_ack.header.source_port = my_socket.addr.port;
     pdu_ack.header.dest_port = my_socket.addr_dist.port;
