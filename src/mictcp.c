@@ -10,8 +10,8 @@ Dans le cas d'une perte
 #include <api/mictcp_core.h>
 
 #define LOSS_RATE 1
-#define LOSS_WINDOW_SIZE 10
-#define LOSS_ACCEPTANCE 30
+#define LOSS_WINDOW_SIZE 30
+#define LOSS_ACCEPTANCE 10
 #define MAX_TRY_CONNECT 15
 #define TIMER 5
 
@@ -120,14 +120,18 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 }
 
 
-
+/*
+ * Calcule le taux de pertes sur la fenêtre glissante 
+ *  Renvoie un entier correspondant à ce taux (en %)
+ */
 int calcul_loss_rate(){
-    int loss=0;
-    for (int i = 0; i<LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
-        loss += lossWindow[i];
+    int loss = 0;
+    for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+        loss += loss_window[i];
     }
     return loss * 100 / LOSS_WINDOW_SIZE;
 }
+
 
 /*
  * Permet de réclamer l’envoi d’une donnée applicative
@@ -182,33 +186,21 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
                 retry = 0;
             }    
         } else {  // succès envoie
-            printf("SUCCES\n");
+            //printf("SUCCES\n");
             loss_window[loss_window_index] = 0;
             retry = 0;
         }
 
         loss_window_index++;
 
-        printf("taux de pertes : %d\n", calcul_loss_rate());
+        //printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
-    printf("loss : %d;  send : %d ; rate : %d\n", nb_loss, nb_send, effective_loss_rate);
+    printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
     seq_num = (seq_num + 1) % 2;
 
     return res_send;
 }
 
-
-/*
- * Calcule le taux de pertes sur la fenêtre glissante 
- *  Renvoie un entier correspondant à ce taux (en %)
- */
-int calcul_loss_rate(){
-    int loss = 0;
-    for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
-        loss += loss_window[i];
-    }
-    return loss * 100 / LOSS_WINDOW_SIZE;
-}
 
 /*
  * Permet à l’application réceptrice de réclamer la récupération d’une donnée
