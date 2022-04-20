@@ -3,9 +3,9 @@
 
 #define LOSS_RATE 5
 #define LOSS_WINDOW_SIZE 100
-#define LOSS_ACCEPTANCE 2
+#define LOSS_ACCEPTANCE 10
 #define MAX_TRY_CONNECT 15
-#define TIMER 5
+#define TIMER 13
 
 protocol_state client_state;
 protocol_state serveur_state;
@@ -162,18 +162,18 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, TIMER);
 
-        
+        printf("envoye : %d recu : %d ", pdu_send.header.seq_num, pdu_recv.header.ack_num);
         if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
             lossWindow[lossWindowIndex] = 1;
 
             effective_loss_rate = calcul_loss_rate();
             if(effective_loss_rate > LOSS_ACCEPTANCE){ //abandon de l'envoi apres trop d'echec
                 retry = 1;
-                printf("abandon   ");
+                printf("abandon  ");
             } else {
                 retry = 0;
                 printf("reessai   ");
-            }    
+            }     
            // printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
         } else {  //reussite de l'envoi
             lossWindow[lossWindowIndex]=0;
