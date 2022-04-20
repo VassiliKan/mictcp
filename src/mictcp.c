@@ -161,7 +161,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
 
         
         printf("ENVOI %d ", nb_send);
-        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
+        if(res_recv == -1 || pdu_recv.header.ack_num != seq_num+1%2) { //echec de reception de l'acquittement ou mauvais numero d'acquittement reçu
             printf("ECHEC : ");
             loss_window[loss_window_index] = 1;
             effective_loss_rate = calcul_loss_rate();
