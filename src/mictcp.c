@@ -8,12 +8,16 @@ Dans le cas d'une perte
 
 #include <mictcp.h>
 #include <api/mictcp_core.h>
+#include <pthread.h>
 
 #define LOSS_RATE 50
 #define LOSS_WINDOW_SIZE 10
 #define LOSS_ACCEPTANCE 10
 #define MAX_TRY_CONNECT 15
-#define TIMER 2000
+#define TIMER 5
+
+pthread_mutex_t accept_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t  accept_cond  = PTHREAD_COND_INITIALIZER;
 
 protocol_state client_state;
 protocol_state serveur_state;
@@ -81,7 +85,15 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
 
-    //serveur_state = ACCEPT;
+    my_socket.state = WAIT_FOR_CONNECTION;
+
+    pthread_mutex_lock(&accept_mutex);
+
+    //while(my_socket.state != CONNECTED){
+        pthread_cond_wait(&accept_cond, &accept_mutex);   // signal from process_pdu_received
+    //}
+
+    pthread_mutex_unlock(&accept_mutex);
 
     return 0;
 }
