@@ -1,43 +1,37 @@
-/*
-Pb ack / seq num : séquence Abandon abandon abandon retry (n fois éventuellement)
-Dans le cas d'une perte
-*/
-
 #include <mictcp.h>
 #include <api/mictcp_core.h>
-#include <pthread.h>
 
-#define LOSS_RATE 50
+#define LOSS_RATE 20
 #define LOSS_WINDOW_SIZE 10
-#define LOSS_ACCEPTANCE 10
 #define MAX_TRY_CONNECT 15
-#define TIMER 5
-
-pthread_mutex_t accept_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t  accept_cond  = PTHREAD_COND_INITIALIZER;
+#define TIMER 15
+#define NUM_SOCKET 10
 
 protocol_state client_state;
-protocol_state serveur_state;
+protocol_state serveur_state;               
 
-//sockets
-mic_tcp_sock my_sockets[9999];
+// socket
+mic_tcp_sock my_socket;
 mic_tcp_sock_addr sock_addr;
-int num_socket = 1; //pour generer un identifiant unique propre au socket
 
-//numéros de séquence
+//numéros de séquence et d'acquittement
 int seq_num = 0;
 int ack_num = 0;
-//PENSER A RESET A LA CONNEXION
 
-//reprise des pertes
+// variables relatives aux pertes
+char *taux_pertes_negociations = "10";
 int nb_send = 0;
 int num_trame = 0;
 int effective_loss_rate = 0;
+int taux_pertes_admissibles = 0;
 
-/////////////////////
-int loss_window[LOSS_WINDOW_SIZE]= {0};
+// Fenêtre glissante comptabilisant les pertes; 0 = OK, 1 = NOK
+int loss_window[LOSS_WINDOW_SIZE]= {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int loss_window_index = 0;
 
+// Mutex et condition pour la fonction accept()
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -49,26 +43,21 @@ int mic_tcp_socket(start_mode sm) {
 
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
    
-   if (initialize_components(sm)==-1){ /* Appel obligatoire */
+   result = initialize_components(sm); /* Appel obligatoire */
+   set_loss_rate(LOSS_RATE);
+
+    if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
         exit(1);
-    } 
-
-    set_loss_rate(LOSS_RATE);
-
-    num_socket = 1;
-    while(my_sockets[num_socket].fd.state != CLOSED && num_socket<=9999){ //recherche d'un socket libre
-        num_socket++;
+    } else {
+        my_socket.fd = NUM_SOCKET; //identifiant du socket, doit etre unique
+        my_socket.state = IDLE;
+        result = my_socket.fd;
     }
-    if (num_socket==10000){
-        num_socket=-1;
-    }
-
-    my_sockets[num_socket].fd = num_socket; //identifiant du socket, doit etre unique
-    my_sockets[num_socket].state = IDLE;    
-
-    return num_socket;
+    
+    return result;
 }
+
 
 /*
  * Permet d’attribuer une adresse à un socket.
@@ -76,10 +65,18 @@ int mic_tcp_socket(start_mode sm) {
  */
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr) {
  
-    //printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    
-    return memcpy(my_sockets[socket].addr, addr, sizeof(addr));
+    int result = -1;
+
+    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+
+    if(my_socket.fd == socket){
+        memcpy(&my_socket.addr, &addr, sizeof(mic_tcp_sock_addr));
+        result = 0;
+    }
+
+    return result;
 }
+
 
 /*
  * Met le socket en état d'acceptation de connexions
@@ -89,42 +86,78 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr) {
     
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
 
+    if(my_socket.fd != socket){
+        return -1;
+    }
+
     my_socket.state = WAIT_FOR_CONNECTION;
 
-    pthread_mutex_lock(&accept_mutex);
+    if(pthread_mutex_lock(&mutex) < 0){
+        printf("ERROR LOCK MUTEX ACCEPT\n");
+    }
 
-    //while(my_socket.state != CONNECTED){
-        pthread_cond_wait(&accept_cond, &accept_mutex);   // signal from process_pdu_received
-    //}
+    while(my_socket.state != CONNECTED){
+        pthread_cond_wait(&cond, &mutex);
+    }
 
-    pthread_mutex_unlock(&accept_mutex);
+    if(pthread_mutex_unlock(&mutex) < 0){
+        printf("ERROR UNLOCK MUTEX ACCEPT\n");
+    }
 
     return 0;
 }
+
 
 /*
  * Permet de réclamer l’établissement d’une connexion
  * Retourne 0 si la connexion est établie, et -1 en cas d’échec
  */
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
-    
+
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   
+
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv;
-    int res_send;
     int res_recv;
     int nb_try = 0;
-    pdu_send.header.source_port = my_sockets[socket].addr.port; 
-    pdu_send.header.dest_port = my_sockets[socket].addr_dist.port; 
-    pdu_send.header.syn = 1; //abandonne
+    int is_not_synack = 1;
+    int msg_size = sizeof(char) * strlen(taux_pertes_negociations);       // fois 3 car taux est maximum composé de trois chiffres
+
+    if (my_socket.fd != NUM_SOCKET){
+        return -1;
+    }
+
+    pdu_send.header.source_port = my_socket.addr.port; 
+    pdu_send.header.dest_port = my_socket.addr_dist.port; 
+    pdu_send.header.syn = 1;
+    pdu_send.payload.size = msg_size;
+    pdu_send.payload.data = malloc (msg_size);
+    memcpy(pdu_send.payload.data, taux_pertes_negociations, msg_size);
+    
     do {
-        res_send = IP_send(pdu_send, my_sockets[socket].addr_dist); 
-        res_recv = IP_recv(&pdu_recv, NULL, 100);
-    } while (res_recv == -1 && nb_try < MAX_TRY_CONNECT);
-      
-    client_state = SYN_SENT;
-    // envoie ACK dans process pdu ?
+        if(IP_send(pdu_send, my_socket.addr_dist) < 0){
+            printf("ERROR SEND SYN\n");
+        } 
+        res_recv = IP_recv(&pdu_recv, NULL, TIMER);
+
+        my_socket.state = WAIT_FOR_SYNACK;
+
+        if(pdu_recv.header.syn == 1 && pdu_recv.header.ack == 1){
+            is_not_synack = 0;
+        }
+
+        nb_try++;
+
+    } while (is_not_synack && nb_try < MAX_TRY_CONNECT);
+
+    pdu_send.header.syn = 0;
+    pdu_send.header.ack = 1;
+
+    if(IP_send(pdu_send, my_socket.addr_dist) < 0){
+        printf("ERROR SEND ACK\n");
+    } 
+
+    my_socket.state = CONNECTED;
 
     return 0;
 }
@@ -136,28 +169,31 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
  */
 int calcul_loss_rate(){
     int loss = 0;
+
     for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
         loss += loss_window[i];
         printf("%d", loss_window[i]);
     }
+
     return loss * 100 / LOSS_WINDOW_SIZE;
 }
 
 
 int decideRetry(){
     int retry;
-
     loss_window[loss_window_index] = 1;
+    
     effective_loss_rate = calcul_loss_rate();
-            
+
     // Cas trop de pertes, on renvoie
-    if(effective_loss_rate > LOSS_ACCEPTANCE){ 
+    if(effective_loss_rate > taux_pertes_admissibles){ 
         printf("RETRY\n");                
         retry = 1;
     } else {
         printf("ABANDON\n");
         retry = 0;
-    }    
+    }
+
     return retry;
 }
 
@@ -166,21 +202,23 @@ int decideRetry(){
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
-int mic_tcp_send (int socket, char* mesg, int mesg_size) {
+int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
     
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv = {0};
     int res_send;
     int res_recv;
     int retry = 0;
-    
 
-    //printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
 
-    pdu_send.header.source_port = my_sockets[socket].addr.port; 
-    pdu_send.header.dest_port = my_sockets[socket].addr_dist.port; 
+    if (my_socket.fd != mic_sock){
+        return -1;
+    }
+
+    pdu_send.header.source_port = my_socket.addr.port; 
+    pdu_send.header.dest_port = my_socket.addr_dist.port; 
     pdu_send.header.seq_num = seq_num; 
-
     pdu_send.payload.size = mesg_size;
     pdu_send.payload.data = malloc (sizeof(char)*mesg_size);
     memcpy(pdu_send.payload.data, mesg, mesg_size);
@@ -188,39 +226,40 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size) {
     nb_send++;
     
     do {
-
-        if (loss_window_index == LOSS_WINDOW_SIZE) { //cyclage du tableau de pertes
+        if (loss_window_index == LOSS_WINDOW_SIZE) { // remise a 0 de l'index pour eviter un debordement d'entier, alternative au modulo
             loss_window_index = 0;
         }
 
-        res_send = IP_send(pdu_send, my_sockets[socket].addr_dist); 
+        res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, TIMER);
-        
+
         //effective_loss_rate = calcul_loss_rate();
-        
-        //printf("ENVOI %d ", nb_send);
-        if(res_recv == -1) { // expiration timer
-            printf("ECHEC TIMER: ");
+
+        printf("ENVOI %d ", nb_send);
+        if(res_recv == -1) {                                    // expiration timer
+            printf("ECHEC TIMER : ");
             retry = decideRetry();
-        } else if (pdu_recv.header.ack_num != seq_num){ // reception du mauvais numero d'acquittement 
-                printf("ECHEC ACK != SEQ : ");
+        } else if (pdu_recv.header.ack_num != seq_num){         // reception du mauvais numero d'acquittement 
+            printf("ECHEC ACK != SEQ : ");
             retry = decideRetry();
             if (!retry) {
                 seq_num = (seq_num + 1) % 2;
             }
-        } else {  // succès envoi
-            //printf("SUCCES\n");
+        } else {                                                // succès envoi
+            printf("SUCCES\n");
             loss_window[loss_window_index] = 0;
             seq_num = (seq_num + 1) % 2;
             retry = 0;
         }
 
         loss_window_index++;
-
         //printf("taux de pertes : %d\n", calcul_loss_rate());
     } while (retry);
+
     printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
+
     num_trame++;
+
     return res_send;
 }
 
@@ -235,13 +274,14 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size) {
      
     mic_tcp_pdu pdu;
 
-/*     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
- */
+    printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
     pdu.payload.data = mesg;
     pdu.payload.size = max_mesg_size;
 
     return app_buffer_get(pdu.payload);
 }
+
 
 /*
  * Traitement d’un PDU MIC-TCP reçu (mise à jour des numéros de séquence
@@ -250,33 +290,59 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size) {
  * app_buffer_put().
  */
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
-    
-    mic_tcp_pdu pdu_ack;
+ 
+    mic_tcp_pdu pdu_send;
 
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
 
-    int num_socket_courant 1;
-    while (my_sockets[num_socket_courant].addr!= addr){
-        num_socket_courant++;
+
+    switch(my_socket.state){
+
+        case WAIT_FOR_CONNECTION:
+            if(pdu.header.syn == 1){ 
+                pdu_send.header.syn = 1;
+                pdu_send.header.ack = 1;
+
+                // Fixe le taux de pertes admissibles, défini dans la varaible taux_pertes_negociations
+
+                taux_pertes_admissibles = atoi(pdu.payload.data);
+
+                my_socket.state = WAIT_FOR_ACK;
+            }
+            break;
+
+        case WAIT_FOR_ACK:
+            if(pdu.header.ack == 1){
+                if(pthread_cond_broadcast(&cond) < 0){
+                    printf("ERROR CONDITION BROADCAST\n");
+                }
+                my_socket.state = CONNECTED;
+            }
+            break;
+
+        case CONNECTED:
+            if(pdu.header.seq_num == ack_num) {
+                app_buffer_put(pdu.payload);
+            } 
+
+            pdu_send.header.ack_num = ack_num;
+
+            ack_num = (ack_num + 1 ) % 2;
+
+            break;
+
+        default:
+            break;
     }
-    num_socket=num_socket_courant;
 
-    if(pdu.header.seq_num == ack_num) {
-        app_buffer_put(pdu.payload);
-    } 
+    pdu_send.header.source_port = my_socket.addr.port;
+    pdu_send.header.dest_port = addr.port;
 
-    printf("%d\n",pdu.header.seq_num);
+    IP_send(pdu_send, addr); // my_socket.addr_dist); // addr emetteur pas en dur
 
-    pdu_ack.header.source_port = my_sockets[num_socket].addr.port;
-    pdu_ack.header.dest_port = my_sockets[num_socket].addr_dist.port;
-    pdu_ack.header.ack_num = ack_num;
-
-    IP_send(pdu_ack, my_sockets[num_socket].addr_dist);
-
-    ack_num = (ack_num + 1 ) % 2;
-
-}
-
+}   
+        
+  
 /*
  * Permet de réclamer la destruction d’un socket.
  * Engendre la fermeture de la connexion suivant le modèle de TCP.
@@ -285,5 +351,6 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
 int mic_tcp_close (int socket) {
 
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
+    
     return 0;
 }
