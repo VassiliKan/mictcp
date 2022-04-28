@@ -21,7 +21,6 @@ int ack_num = 0;
 // variables relatives aux pertes
 char *taux_pertes_negociations = "10";
 int nb_send = 0;
-int num_trame = 0;
 int effective_loss_rate = 0;
 int taux_pertes_admissibles = 0;
 
@@ -39,12 +38,22 @@ pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
  */
 int mic_tcp_socket(start_mode sm) {
     
-   int result;
+    int result;
 
-   printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf(" mode %d", sm); printf("\n");
    
-   result = initialize_components(sm); /* Appel obligatoire */
-   set_loss_rate(LOSS_RATE);
+    result = initialize_components(sm); /* Appel obligatoire */
+
+    /*
+    * A décommenter si l'on veut obtenir une fiabilité totale sur les trames d'acquittement, le taux de pertes effectif global est alors égal à LOSS_RATE
+    *
+    if(sm == CLIENT){
+        set_loss_rate(LOSS_RATE);
+    } else {
+        set_loss_rate(0);
+    }*/
+
+    set_loss_rate(LOSS_RATE);
 
     if (result==-1){
         printf("Erreur dans l'initialisation des components\n");
@@ -170,19 +179,23 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 int calcul_loss_rate(){
     int loss = 0;
 
-    for (int i = 0; i < LOSS_WINDOW_SIZE; i++){ //calcul du loss rate
+    for (int i = 0; i < LOSS_WINDOW_SIZE; i++){             // boucle sur le tableau des derniers envois et calcul du loss rate
         loss += loss_window[i];
-        printf("%d", loss_window[i]);
+        //printf("%d", loss_window[i]);
     }
 
     return loss * 100 / LOSS_WINDOW_SIZE;
 }
 
 
+/*
+ * Appelle fonction de calcul du taux de pertes sur la fenêtre glissante
+ * Décide de renvoyer ou non le paquet en comparant le taux de pertes effectif à celui admissible
+ */
 int decideRetry(){
     int retry;
     loss_window[loss_window_index] = 1;
-    
+
     effective_loss_rate = calcul_loss_rate();
 
     // Cas trop de pertes, on renvoie
@@ -233,8 +246,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         res_send = IP_send(pdu_send, my_socket.addr_dist); 
         res_recv = IP_recv(&pdu_recv, NULL, TIMER);
 
-        //effective_loss_rate = calcul_loss_rate();
-
         printf("ENVOI %d ", nb_send);
         if(res_recv == -1) {                                    // expiration timer
             printf("ECHEC TIMER : ");
@@ -253,12 +264,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size) {
         }
 
         loss_window_index++;
-        //printf("taux de pertes : %d\n", calcul_loss_rate());
+
     } while (retry);
-
-    printf("send : %d ; rate : %d\n", nb_send, effective_loss_rate);
-
-    num_trame++;
 
     return res_send;
 }
