@@ -127,7 +127,6 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
 
     mic_tcp_pdu pdu_send;
     mic_tcp_pdu pdu_recv;
-    int res_recv;
     int nb_try = 0;
     int is_not_synack = 1;
     int msg_size = sizeof(char) * strlen(taux_pertes_negociations);       // fois 3 car taux est maximum composé de trois chiffres
@@ -147,7 +146,8 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr) {
         if(IP_send(pdu_send, my_socket.addr_dist) < 0){
             printf("ERROR SEND SYN\n");
         } 
-        res_recv = IP_recv(&pdu_recv, NULL, TIMER);
+        
+        IP_recv(&pdu_recv, NULL, TIMER);
 
         my_socket.state = WAIT_FOR_SYNACK;
 
